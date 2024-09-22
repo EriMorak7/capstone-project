@@ -17,14 +17,16 @@ def register_user(full_name, username, password, initial_deposit):
     cursor = conn.cursor()
 
     try:
-        cursor.execute('''
+        cursor.execute(''' 
             INSERT INTO Users (full_name, username, password, balance) 
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?) 
         ''', (full_name, username, hashed_password, initial_deposit))
         conn.commit()
         print("Registration successful.")
     except sqlite3.IntegrityError:
         print("Username already exists.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
     finally:
         conn.close()
 
@@ -33,12 +35,17 @@ def login_user(username, password):
     cursor = conn.cursor()
 
     hashed_password = hash_password(password)
-    cursor.execute('SELECT user_id FROM Users WHERE username = ? AND password = ?', (username, hashed_password))
-    result = cursor.fetchone()
-    conn.close()
+    try:
+        cursor.execute('SELECT user_id FROM Users WHERE username = ? AND password = ?', (username, hashed_password))
+        result = cursor.fetchone()
+    except Exception as e:
+        print(f"An error occurred during login: {e}")
+        return None
+    finally:
+        conn.close()
 
     if result:
-        return result[0] 
+        return result[0]
     print("Invalid username or password.")
     return None
 
@@ -50,12 +57,15 @@ def deposit(user_id, amount):
     conn = connect_db()
     cursor = conn.cursor()
 
-    cursor.execute('UPDATE Users SET balance = balance + ? WHERE user_id = ?', (amount, user_id))
-    cursor.execute('INSERT INTO Transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', (user_id, 'deposit', amount))
-
-    conn.commit()
-    conn.close()
-    print("Deposit successful.")
+    try:
+        cursor.execute('UPDATE Users SET balance = balance + ? WHERE user_id = ?', (amount, user_id))
+        cursor.execute('INSERT INTO Transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', (user_id, 'deposit', amount))
+        conn.commit()
+        print("Deposit successful.")
+    except Exception as e:
+        print(f"An error occurred during deposit: {e}")
+    finally:
+        conn.close()
 
 def withdraw(user_id, amount):
     if amount <= 0:
@@ -65,35 +75,49 @@ def withdraw(user_id, amount):
     conn = connect_db()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT balance FROM Users WHERE user_id = ?', (user_id,))
-    balance = cursor.fetchone()[0]
+    try:
+        cursor.execute('SELECT balance FROM Users WHERE user_id = ?', (user_id,))
+        balance = cursor.fetchone()[0]
 
-    if balance >= amount:
-        cursor.execute('UPDATE Users SET balance = balance - ? WHERE user_id = ?', (amount, user_id))
-        cursor.execute('INSERT INTO Transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', (user_id, 'withdrawal', amount))
-        conn.commit()
-        print("Withdrawal successful.")
-    else:
-        print("Insufficient funds.")
-    conn.close()
+        if balance >= amount:
+            cursor.execute('UPDATE Users SET balance = balance - ? WHERE user_id = ?', (amount, user_id))
+            cursor.execute('INSERT INTO Transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', (user_id, 'withdrawal', amount))
+            conn.commit()
+            print("Withdrawal successful.")
+        else:
+            print("Insufficient funds.")
+    except Exception as e:
+        print(f"An error occurred during withdrawal: {e}")
+    finally:
+        conn.close()
 
 def get_balance(user_id):
     conn = connect_db()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT balance FROM Users WHERE user_id = ?', (user_id,))
-    balance = cursor.fetchone()[0]
-    conn.close()
-    return balance
+    try:
+        cursor.execute('SELECT balance FROM Users WHERE user_id = ?', (user_id,))
+        balance = cursor.fetchone()[0]
+        return balance
+    except Exception as e:
+        print(f"An error occurred while fetching balance: {e}")
+        return None
+    finally:
+        conn.close()
 
 def transaction_history(user_id):
     conn = connect_db()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM Transactions WHERE user_id = ?', (user_id,))
-    transactions = cursor.fetchall()
-    conn.close()
-    return transactions
+    try:
+        cursor.execute('SELECT * FROM Transactions WHERE user_id = ?', (user_id,))
+        transactions = cursor.fetchall()
+        return transactions
+    except Exception as e:
+        print(f"An error occurred while fetching transaction history: {e}")
+        return []
+    finally:
+        conn.close()
 
 def main():
     while True:
@@ -142,7 +166,8 @@ def main():
                     
                     elif transaction_choice == '3':
                         balance = get_balance(user_id)
-                        print(f"Your balance is {balance:.2f}")
+                        if balance is not None:
+                            print(f"Your balance is {balance:.2f}")
 
                     elif transaction_choice == '4':
                         history = transaction_history(user_id)
