@@ -1,5 +1,6 @@
 import sqlite3
 import hashlib
+import re
 
 def connect_db():
     return sqlite3.connect('banking_app.db')
@@ -7,8 +8,23 @@ def connect_db():
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
+def validate_username(username):
+    return bool(re.match("^[a-zA-Z0-9_]{3,20}$", username))
+
+def validate_password(password):
+    return len(password) >= 6
+
+def validate_initial_deposit(initial_deposit):
+    return initial_deposit >= 0
+
+def validate_full_name(full_name):
+    return bool(re.match("^[a-zA-Z\s]+$", full_name))
+
 def register_user(full_name, username, password, initial_deposit):
-    if initial_deposit < 0:
+    if not validate_full_name(full_name):
+        print("Full name can only contain alphabets and spaces.")
+        return
+    if not validate_initial_deposit(initial_deposit):
         print("Initial deposit cannot be negative.")
         return
 
@@ -129,10 +145,25 @@ def main():
 
         if choice == '1':
             full_name = input("Full Name: ")
+            if not validate_full_name(full_name):
+                print("Invalid Name.")
+                continue
+            
             username = input("Username: ")
-            password = input("Password: ")
+            if not validate_username(username):
+                print("Invalid username")
+                continue
+            
+            password = input("Password (at least 6 characters): ")
+            if not validate_password(password):
+                print("Invalid password. It must be at least 6 characters long.")
+                continue
+            
             try:
                 initial_deposit = float(input("Initial Deposit: "))
+                if not validate_initial_deposit(initial_deposit):
+                    print("Invalid deposit amount. Must be a non-negative number.")
+                    continue
                 register_user(full_name, username, password, initial_deposit)
             except ValueError:
                 print("Invalid deposit amount. Must be a number.")
@@ -155,14 +186,14 @@ def main():
                             amount = float(input("Amount to deposit: "))
                             deposit(user_id, amount)
                         except ValueError:
-                            print("Invalid amount. Must be a number.")
+                            print("Invalid input. Must be a number.")
                     
                     elif transaction_choice == '2':
                         try:
                             amount = float(input("Amount to withdraw: "))
                             withdraw(user_id, amount)
                         except ValueError:
-                            print("Invalid amount. Must be a number.")
+                            print("Invalid input. Must be a number.")
                     
                     elif transaction_choice == '3':
                         balance = get_balance(user_id)
