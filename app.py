@@ -1,215 +1,212 @@
 import sqlite3
-import hashlib
+import getpass
 import re
+import time
+from database import create_connection
 
-def connect_db():
-    return sqlite3.connect('banking_app.db')
+DB_FILE = 'banking.db'
 
-def hash_password(password):
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+def validate_full_name(name):
+    """Validate the full name for length and character restrictions."""
+    return len(name) >= 4 and len(name) <= 255 and all(c.isalpha() or c.isspace() for c in name)
 
 def validate_username(username):
-    return bool(re.match("^[a-zA-Z0-9_]{3,20}$", username))
+    """Validate the username for length and allowed characters."""
+    return 3 <= len(username) <= 20 and re.match("^[a-zA-Z0-9_]+$", username) is not None
 
 def validate_password(password):
-    return len(password) >= 6
+    """Validate the password for complexity requirements."""
+    return (len(password) >= 8 and 
+            re.search("[a-z]", password) and 
+            re.search("[A-Z]", password) and 
+            re.search("[0-9]", password))
 
-def validate_initial_deposit(initial_deposit):
-    return initial_deposit >= 0
+def validate_initial_deposit(amount):
+    """Check if the initial deposit meets minimum requirements."""
+    return isinstance(amount, (int, float)) and amount >= 1000
 
-def validate_full_name(full_name):
-    return bool(re.match("^[a-zA-Z\s]+$", full_name))
-
-def register_user(full_name, username, password, initial_deposit):
+def register_user(conn):
+    """Register a new user in the database."""
+    full_name = input("Enter your full name: ")
     if not validate_full_name(full_name):
-        print("Full name can only contain alphabets and spaces.")
+        print("Invalid full name.")
         return
+    
+    username = input("Choose a username: ")
+    if not validate_username(username):
+        print("Invalid username.")
+        return
+    
+    password = getpass.getpass("Choose a password: ")
+    if not validate_password(password):
+        print("Invalid password. Must be at least 8 characters")
+        return
+    
+    initial_deposit = float(input("Enter initial deposit (min 1000): "))
     if not validate_initial_deposit(initial_deposit):
-        print("Initial deposit cannot be negative.")
+        print("Invalid deposit amount.")
         return
 
-    hashed_password = hash_password(password)
-    conn = connect_db()
+ # Generate a simple account number
+    account_number = str(int(time.time())) 
+    
+# Hashing Password 
+    hashed_password = password  
+    
+# Registration
+    with conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO users (full_name, username, password, account_number, balance) VALUES (?, ?, ?, ?, ?)', 
+                       (full_name, username, hashed_password, account_number, initial_deposit))
+        print(f"Registration successful! Your account number is {account_number}. Please log in.")
+        time.sleep(1)
+
+# Login
+def login_user(conn):
+    """Authenticate a user and return user data upon successful login."""
+    username = input("Enter your username: ")
+    password = getpass.getpass("Enter your password: ")
+
     cursor = conn.cursor()
+    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+    user = cursor.fetchone()
 
-    try:
-        cursor.execute(''' 
-            INSERT INTO Users (full_name, username, password, balance) 
-            VALUES (?, ?, ?, ?) 
-        ''', (full_name, username, hashed_password, initial_deposit))
-        conn.commit()
-        print("Registration successful.")
-    except sqlite3.IntegrityError:
-        print("Username already exists.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        conn.close()
-
-def login_user(username, password):
-    conn = connect_db()
-    cursor = conn.cursor()
-
-    hashed_password = hash_password(password)
-    try:
-        cursor.execute('SELECT user_id FROM Users WHERE username = ? AND password = ?', (username, hashed_password))
-        result = cursor.fetchone()
-    except Exception as e:
-        print(f"An error occurred during login: {e}")
+    if user and user[3] == password:  # Check password
+        print("Login successful!")
+        return user
+    else:
+        print("Invalid username or password.")
         return None
-    finally:
-        conn.close()
 
-    if result:
-        return result[0]
-    print("Invalid username or password.")
-    return None
-
-def deposit(user_id, amount):
+# Deposit
+def deposit(conn, user_id):
+    """Deposit an amount into the user's account."""
+    amount = float(input("Enter deposit amount: "))
     if amount <= 0:
-        print("Deposit amount must be positive.")
+        print("Invalid amount.")
         return
 
-    conn = connect_db()
+    with conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (amount, user_id))
+        cursor.execute('INSERT INTO transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', 
+                       (user_id, 'deposit', amount))
+        print(f"Successfully deposited {amount}.")
+
+# Withdrawal
+def withdrawal(conn, user_id):
+    """Withdraw an amount from the user's account."""
+    amount = float(input("Enter withdrawal amount: "))
+    
     cursor = conn.cursor()
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
+    balance = cursor.fetchone()[0]
 
-    try:
-        cursor.execute('UPDATE Users SET balance = balance + ? WHERE user_id = ?', (amount, user_id))
-        cursor.execute('INSERT INTO Transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', (user_id, 'deposit', amount))
-        conn.commit()
-        print("Deposit successful.")
-    except Exception as e:
-        print(f"An error occurred during deposit: {e}")
-    finally:
-        conn.close()
-
-def withdraw(user_id, amount):
-    if amount <= 0:
-        print("Withdrawal amount must be positive.")
+    if amount <= 0 or amount > balance:
+        print("Invalid withdrawal amount.")
         return
 
-    conn = connect_db()
+    with conn:
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, user_id))
+        cursor.execute('INSERT INTO transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', 
+                       (user_id, 'withdrawal', amount))
+        print(f"Successfully withdrew {amount}.")
+
+# Balance Inquiry
+def balance_inquiry(conn, user_id):
+    """Display the user's current account balance."""
     cursor = conn.cursor()
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
+    balance = cursor.fetchone()[0]
+    print(f"Your current balance is: {balance}")
 
-    try:
-        cursor.execute('SELECT balance FROM Users WHERE user_id = ?', (user_id,))
-        balance = cursor.fetchone()[0]
-
-        if balance >= amount:
-            cursor.execute('UPDATE Users SET balance = balance - ? WHERE user_id = ?', (amount, user_id))
-            cursor.execute('INSERT INTO Transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', (user_id, 'withdrawal', amount))
-            conn.commit()
-            print("Withdrawal successful.")
-        else:
-            print("Insufficient funds.")
-    except Exception as e:
-        print(f"An error occurred during withdrawal: {e}")
-    finally:
-        conn.close()
-
-def get_balance(user_id):
-    conn = connect_db()
+# Transaction History
+def transaction_history(conn, user_id):
+    """Display the user's transaction history."""
     cursor = conn.cursor()
+    cursor.execute('SELECT transaction_type, amount, timestamp FROM transactions WHERE user_id = ?', (user_id,))
+    transactions = cursor.fetchall()
+    
+    if transactions:
+        print("Transaction History:")
+        for transaction in transactions:
+            print(f"{transaction[2]}: {transaction[0]} of {transaction[1]}")
+    else:
+        print("No transactions found.")
 
-    try:
-        cursor.execute('SELECT balance FROM Users WHERE user_id = ?', (user_id,))
-        balance = cursor.fetchone()[0]
-        return balance
-    except Exception as e:
-        print(f"An error occurred while fetching balance: {e}")
-        return None
-    finally:
-        conn.close()
+# Transfer
+def transfer(conn, user_id):
+    """Transfer money to another user's account."""
+    recipient_account_number = input("Enter recipient's account number: ")
+    amount = float(input("Enter transfer amount: "))
 
-def transaction_history(user_id):
-    conn = connect_db()
+    # Check if recipient exists
     cursor = conn.cursor()
+    cursor.execute('SELECT id, balance FROM users WHERE account_number = ?', (recipient_account_number,))
+    recipient = cursor.fetchone()
 
-    try:
-        cursor.execute('SELECT * FROM Transactions WHERE user_id = ?', (user_id,))
-        transactions = cursor.fetchall()
-        return transactions
-    except Exception as e:
-        print(f"An error occurred while fetching transaction history: {e}")
-        return []
-    finally:
-        conn.close()
+    if not recipient:
+        print("Recipient account does not exist.")
+        return
 
+    if amount <= 0:
+        print("Invalid transfer amount.")
+        return
+
+    if amount > recipient[1]:  # Check sender's balance
+        print("Insufficient funds for transfer.")
+        return
+
+    with conn:
+        # Update balances
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, user_id))
+        cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (amount, recipient[0]))
+        cursor.execute('INSERT INTO transactions (user_id, transaction_type, amount) VALUES (?, ?, ?)', 
+                       (user_id, 'transfer', amount))
+        print(f"Successfully transferred {amount} to account {recipient_account_number}.")
+
+# Main Application
 def main():
+    """Main application logic for the banking system."""
+    conn = create_connection(DB_FILE)
+
     while True:
-        print("\nWelcome to the Banking App")
-        print("1. Register")
-        print("2. Login")
-        print("3. Exit")
-        choice = input("Enter your choice: ")
+        print("\n1. Register\n2. Login\n3. Exit")
+        choice = input("Choose an option: ")
 
         if choice == '1':
-            full_name = input("Full Name: ")
-            if not validate_full_name(full_name):
-                print("Invalid Name.")
-                continue
-            
-            username = input("Username: ")
-            if not validate_username(username):
-                print("Invalid username")
-                continue
-            
-            password = input("Password (at least 6 characters): ")
-            if not validate_password(password):
-                print("Invalid password. It must be at least 6 characters long.")
-                continue
-            
-            try:
-                initial_deposit = float(input("Initial Deposit: "))
-                if not validate_initial_deposit(initial_deposit):
-                    print("Invalid deposit amount. Must be a non-negative number.")
-                    continue
-                register_user(full_name, username, password, initial_deposit)
-            except ValueError:
-                print("Invalid deposit amount. Must be a number.")
-
+            register_user(conn)
         elif choice == '2':
-            username = input("Username: ")
-            password = input("Password: ")
-            user_id = login_user(username, password)
-            if user_id:
+            user = login_user(conn)
+            if user:
+                user_id = user[0]  # User ID from the database
                 while True:
-                    print("\n1. Deposit")
-                    print("2. Withdraw")
-                    print("3. Check Balance")
-                    print("4. Transaction History")
-                    print("5. Logout")
-                    transaction_choice = input("Enter your choice: ")
+                    print("\n1. Deposit\n2. Withdraw\n3. Balance Inquiry\n4. Transaction History\n5. Transfer\n6. Logout")
+                    action = input("Choose an action: ")
 
-                    if transaction_choice == '1':
-                        try:
-                            amount = float(input("Amount to deposit: "))
-                            deposit(user_id, amount)
-                        except ValueError:
-                            print("Invalid input. Must be a number.")
-                    
-                    elif transaction_choice == '2':
-                        try:
-                            amount = float(input("Amount to withdraw: "))
-                            withdraw(user_id, amount)
-                        except ValueError:
-                            print("Invalid input. Must be a number.")
-                    
-                    elif transaction_choice == '3':
-                        balance = get_balance(user_id)
-                        if balance is not None:
-                            print(f"Your balance is {balance:.2f}")
-
-                    elif transaction_choice == '4':
-                        history = transaction_history(user_id)
-                        for txn in history:
-                            print(txn)
-                    
-                    elif transaction_choice == '5':
+                    if action == '1':
+                        deposit(conn, user_id)
+                    elif action == '2':
+                        withdrawal(conn, user_id)
+                    elif action == '3':
+                        balance_inquiry(conn, user_id)
+                    elif action == '4':
+                        transaction_history(conn, user_id)
+                    elif action == '5':
+                        transfer(conn, user_id)
+                    elif action == '6':
+                        print("Logging out...")
                         break
-
+                    else:
+                        print("Invalid option.")
+                    time.sleep(1)
         elif choice == '3':
+            print("Exiting the application.")
             break
+        else:
+            print("Invalid option.")
+    
+    conn.close()
 
 if __name__ == "__main__":
     main()
